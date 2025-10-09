@@ -1,0 +1,584 @@
+import React, { useState, useRef } from 'react';
+import { Upload, ZoomIn, ZoomOut, Download, AlertTriangle, CheckCircle, Edit3, Save, FileText } from 'lucide-react';
+
+const XrayDiagnosticTool = () => {
+  const [image, setImage] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [results, setResults] = useState(null);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [currentStep, setCurrentStep] = useState('upload');
+  const [patientContext, setPatientContext] = useState({
+    age: '',
+    sex: '',
+    symptoms: '',
+    smokingStatus: 'never',
+    vitals: { temp: '', bp: '', hr: '', rr: '', spo2: '' },
+    comorbidities: []
+  });
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [treatmentPlan, setTreatmentPlan] = useState('');
+  const [clinicianNotes, setClinicianNotes] = useState('');
+  const [signedOff, setSignedOff] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Mock AI analysis with realistic chest X-ray findings
+  const analyzeImage = async () => {
+    setAnalyzing(true);
+    setCurrentStep('analyzing');
+    
+    // Simulate AI processing time
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    
+    const mockResults = {
+      modelVersion: 'DenseNet-121-CheXpert-v1.0',
+      timestamp: new Date().toISOString(),
+      findings: [
+        { 
+          name: 'Cardiomegaly', 
+          confidence: 0.78, 
+          severity: 'moderate',
+          region: { x: 35, y: 40, w: 30, h: 25 },
+          description: 'Enlarged cardiac silhouette with cardiothoracic ratio >0.5'
+        },
+        { 
+          name: 'Pleural Effusion', 
+          confidence: 0.65, 
+          severity: 'mild',
+          region: { x: 15, y: 55, w: 20, h: 30 },
+          description: 'Blunting of costophrenic angle suggestive of fluid'
+        },
+        { 
+          name: 'Lung Opacity', 
+          confidence: 0.82, 
+          severity: 'moderate',
+          region: { x: 60, y: 35, w: 25, h: 20 },
+          description: 'Patchy opacity in right mid-lung zone'
+        }
+      ],
+      differentials: [
+        'Community-acquired pneumonia',
+        'Congestive heart failure',
+        'Pulmonary edema',
+        'Atypical infection'
+      ],
+      urgency: 'moderate',
+      auroc: 0.87
+    };
+    
+    setResults(mockResults);
+    setAnalyzing(false);
+    setCurrentStep('results');
+    
+    // Initialize treatment plan
+    setTreatmentPlan(`Based on imaging findings and clinical context:
+
+1. Antibiotic Therapy: Consider empiric treatment for community-acquired pneumonia (CAP)
+   - First-line: Amoxicillin-clavulanate 875mg BID or Azithromycin 500mg daily
+   - Reference: IDSA/ATS CAP Guidelines 2019
+
+2. Cardiac Evaluation: Given cardiomegaly
+   - Obtain BNP/NT-proBNP
+   - Consider echocardiogram if CHF suspected
+   - Reference: ACC/AHA Heart Failure Guidelines 2022
+
+3. Monitoring & Follow-up:
+   - Repeat chest X-ray in 48-72 hours if no improvement
+   - Monitor vital signs, especially oxygen saturation
+   - Consider chest CT if diagnostic uncertainty persists
+
+⚠️ CLINICIAN REVIEW REQUIRED - This is a draft plan for editing`);
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImage(event.target.result);
+        setCurrentStep('image-loaded');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleContextSubmit = () => {
+    setCurrentStep('plan');
+  };
+
+  const generateReport = () => {
+    const reportContent = `
+AI X-RAY DIAGNOSTIC REPORT
+${new Date().toLocaleString()}
+
+DISCLAIMER: Research prototype - Requires clinician review and signoff
+
+PATIENT CONTEXT:
+Age: ${patientContext.age || 'Not provided'}
+Sex: ${patientContext.sex || 'Not provided'}
+Symptoms: ${patientContext.symptoms || 'Not provided'}
+Smoking Status: ${patientContext.smokingStatus}
+
+VITAL SIGNS:
+Temperature: ${patientContext.vitals.temp || 'N/A'}
+Blood Pressure: ${patientContext.vitals.bp || 'N/A'}
+Heart Rate: ${patientContext.vitals.hr || 'N/A'}
+Respiratory Rate: ${patientContext.vitals.rr || 'N/A'}
+SpO2: ${patientContext.vitals.spo2 || 'N/A'}
+
+AI FINDINGS (Model: ${results.modelVersion}):
+${results.findings.map((f, i) => `${i + 1}. ${f.name} (Confidence: ${(f.confidence * 100).toFixed(0)}%, Severity: ${f.severity})
+   ${f.description}`).join('\n')}
+
+DIFFERENTIAL DIAGNOSES:
+${results.differentials.map((d, i) => `${i + 1}. ${d}`).join('\n')}
+
+TREATMENT PLAN (Clinician-Edited):
+${treatmentPlan}
+
+CLINICIAN NOTES:
+${clinicianNotes || 'None'}
+
+AUDIT TRAIL:
+Model Version: ${results.modelVersion}
+Analysis Timestamp: ${results.timestamp}
+Report Generated: ${new Date().toISOString()}
+Clinician Sign-off: ${signedOff ? 'YES' : 'PENDING'}
+
+This report was generated with AI assistance and has been reviewed by a licensed clinician.
+    `.trim();
+
+    const blob = new Blob([reportContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `xray-report-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const getSeverityColor = (severity) => {
+    switch(severity) {
+      case 'critical': return 'text-red-600 bg-red-50';
+      case 'moderate': return 'text-orange-600 bg-orange-50';
+      case 'mild': return 'text-yellow-600 bg-yellow-50';
+      default: return 'text-gray-600 bg-gray-50';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-blue-900 text-white p-4 shadow-lg">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">AI X-ray Diagnostic Reader</h1>
+            <p className="text-sm text-blue-200">Doctor-in-the-Loop System v1.0</p>
+          </div>
+          <div className="bg-red-500 px-4 py-2 rounded-lg font-semibold text-sm">
+            ⚠️ RESEARCH PROTOTYPE ONLY
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Progress Steps */}
+        <div className="mb-6 flex items-center justify-center space-x-4">
+          {['Upload', 'Analyze', 'Context', 'Plan', 'Export'].map((step, i) => (
+            <div key={step} className="flex items-center">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
+                i <= ['upload', 'image-loaded', 'analyzing', 'results', 'context', 'plan', 'export'].indexOf(currentStep)
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-300 text-gray-600'
+              }`}>
+                {i + 1}
+              </div>
+              <span className="ml-2 text-sm font-medium">{step}</span>
+              {i < 4 && <div className="w-12 h-1 bg-gray-300 mx-2" />}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left Panel - Image Viewer */}
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-bold mb-4 flex items-center">
+              <FileText className="mr-2" /> Image Viewer
+            </h2>
+            
+            {!image ? (
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className="border-4 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 transition-colors"
+              >
+                <Upload className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+                <p className="text-lg font-medium text-gray-700">Upload X-ray Image</p>
+                <p className="text-sm text-gray-500 mt-2">PNG, JPEG supported</p>
+                <input 
+                  ref={fileInputRef}
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleImageUpload} 
+                  className="hidden"
+                />
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 flex items-center space-x-2">
+                  <button 
+                    onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
+                    className="p-2 bg-gray-200 rounded hover:bg-gray-300"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => setZoom(Math.min(3, zoom + 0.25))}
+                    className="p-2 bg-gray-200 rounded hover:bg-gray-300"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <span className="text-sm font-medium">{(zoom * 100).toFixed(0)}%</span>
+                  
+                  <div className="ml-4 flex items-center space-x-2 flex-1">
+                    <label className="text-sm">Brightness:</label>
+                    <input 
+                      type="range" 
+                      min="50" 
+                      max="150" 
+                      value={brightness}
+                      onChange={(e) => setBrightness(e.target.value)}
+                      className="flex-1"
+                    />
+                    <label className="text-sm">Contrast:</label>
+                    <input 
+                      type="range" 
+                      min="50" 
+                      max="150" 
+                      value={contrast}
+                      onChange={(e) => setContrast(e.target.value)}
+                      className="flex-1"
+                    />
+                  </div>
+                  
+                  {results && (
+                    <button 
+                      onClick={() => setShowOverlay(!showOverlay)}
+                      className={`px-3 py-2 rounded text-sm font-medium ${
+                        showOverlay ? 'bg-blue-600 text-white' : 'bg-gray-200'
+                      }`}
+                    >
+                      Overlay
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative bg-black rounded-lg overflow-hidden" style={{ height: '500px' }}>
+                  <img 
+                    src={image} 
+                    alt="X-ray" 
+                    style={{
+                      transform: `scale(${zoom})`,
+                      filter: `brightness(${brightness}%) contrast(${contrast}%)`,
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain'
+                    }}
+                    className="absolute inset-0 m-auto"
+                  />
+                  
+                  {results && showOverlay && results.findings.map((finding, i) => (
+                    <div 
+                      key={i}
+                      className="absolute border-2 border-red-500 bg-red-500 bg-opacity-20"
+                      style={{
+                        left: `${finding.region.x}%`,
+                        top: `${finding.region.y}%`,
+                        width: `${finding.region.w}%`,
+                        height: `${finding.region.h}%`,
+                        transform: `scale(${zoom})`
+                      }}
+                    >
+                      <div className="absolute -top-6 left-0 bg-red-500 text-white px-2 py-1 rounded text-xs font-semibold">
+                        {finding.name}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {currentStep === 'image-loaded' && (
+                  <button 
+                    onClick={analyzeImage}
+                    className="w-full mt-4 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                  >
+                    Analyze X-ray with AI
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Right Panel - Results and Context */}
+          <div className="space-y-6">
+            {analyzing && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-center space-x-3">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="text-lg font-medium">Analyzing X-ray...</span>
+                </div>
+                <p className="text-sm text-gray-600 text-center mt-2">Running DenseNet-121 inference</p>
+              </div>
+            )}
+
+            {results && currentStep === 'results' && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <h2 className="text-xl font-bold mb-4">AI Findings</h2>
+                <div className="mb-4 text-xs text-gray-500">
+                  Model: {results.modelVersion} | AUROC: {results.auroc} | {new Date(results.timestamp).toLocaleString()}
+                </div>
+                
+                {results.urgency === 'critical' && (
+                  <div className="mb-4 bg-red-50 border-2 border-red-500 rounded-lg p-4 flex items-start">
+                    <AlertTriangle className="text-red-500 mr-3 flex-shrink-0 mt-1" />
+                    <div>
+                      <div className="font-bold text-red-700">URGENT ACTION REQUIRED</div>
+                      <div className="text-sm text-red-600">Critical finding detected. Immediate clinical review necessary.</div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-3 mb-6">
+                  {results.findings.map((finding, i) => (
+                    <div key={i} className={`p-3 rounded-lg border ${getSeverityColor(finding.severity)}`}>
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="font-semibold">{finding.name}</span>
+                        <span className="text-sm font-medium">{(finding.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="text-sm">{finding.description}</div>
+                      <div className="text-xs mt-1 capitalize">Severity: {finding.severity}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="font-semibold mb-2">Differential Diagnoses:</h3>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    {results.differentials.map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <button 
+                  onClick={() => setCurrentStep('context')}
+                  className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700"
+                >
+                  Enter Patient Context
+                </button>
+              </div>
+            )}
+
+            {currentStep === 'context' && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <h2 className="text-xl font-bold mb-4">Patient Clinical Context</h2>
+                
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Age</label>
+                      <input 
+                        type="number" 
+                        value={patientContext.age}
+                        onChange={(e) => setPatientContext({...patientContext, age: e.target.value})}
+                        className="w-full border rounded px-3 py-2"
+                        placeholder="Years"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Sex</label>
+                      <select 
+                        value={patientContext.sex}
+                        onChange={(e) => setPatientContext({...patientContext, sex: e.target.value})}
+                        className="w-full border rounded px-3 py-2"
+                      >
+                        <option value="">Select</option>
+                        <option value="M">Male</option>
+                        <option value="F">Female</option>
+                        <option value="O">Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Chief Complaint / Symptoms</label>
+                    <textarea 
+                      value={patientContext.symptoms}
+                      onChange={(e) => setPatientContext({...patientContext, symptoms: e.target.value})}
+                      className="w-full border rounded px-3 py-2"
+                      rows="2"
+                      placeholder="e.g., Cough, fever for 3 days"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Smoking Status</label>
+                    <select 
+                      value={patientContext.smokingStatus}
+                      onChange={(e) => setPatientContext({...patientContext, smokingStatus: e.target.value})}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="never">Never</option>
+                      <option value="former">Former</option>
+                      <option value="current">Current</option>
+                    </select>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3">Vital Signs</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <input 
+                        type="text" 
+                        placeholder="Temp (°F)"
+                        value={patientContext.vitals.temp}
+                        onChange={(e) => setPatientContext({
+                          ...patientContext, 
+                          vitals: {...patientContext.vitals, temp: e.target.value}
+                        })}
+                        className="border rounded px-3 py-2 text-sm"
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="BP (mmHg)"
+                        value={patientContext.vitals.bp}
+                        onChange={(e) => setPatientContext({
+                          ...patientContext, 
+                          vitals: {...patientContext.vitals, bp: e.target.value}
+                        })}
+                        className="border rounded px-3 py-2 text-sm"
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="HR (bpm)"
+                        value={patientContext.vitals.hr}
+                        onChange={(e) => setPatientContext({
+                          ...patientContext, 
+                          vitals: {...patientContext.vitals, hr: e.target.value}
+                        })}
+                        className="border rounded px-3 py-2 text-sm"
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="RR (breaths/min)"
+                        value={patientContext.vitals.rr}
+                        onChange={(e) => setPatientContext({
+                          ...patientContext, 
+                          vitals: {...patientContext.vitals, rr: e.target.value}
+                        })}
+                        className="border rounded px-3 py-2 text-sm"
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="SpO2 (%)"
+                        value={patientContext.vitals.spo2}
+                        onChange={(e) => setPatientContext({
+                          ...patientContext, 
+                          vitals: {...patientContext.vitals, spo2: e.target.value}
+                        })}
+                        className="border rounded px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleContextSubmit}
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 mt-4"
+                  >
+                    Generate Treatment Plan
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {currentStep === 'plan' && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <h2 className="text-xl font-bold mb-4 flex items-center justify-between">
+                  Evidence-Based Treatment Plan
+                  <button 
+                    onClick={() => setEditingPlan(!editingPlan)}
+                    className="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300 flex items-center"
+                  >
+                    {editingPlan ? <Save className="w-4 h-4 mr-1" /> : <Edit3 className="w-4 h-4 mr-1" />}
+                    {editingPlan ? 'Save' : 'Edit'}
+                  </button>
+                </h2>
+
+                {editingPlan ? (
+                  <textarea 
+                    value={treatmentPlan}
+                    onChange={(e) => setTreatmentPlan(e.target.value)}
+                    className="w-full border rounded px-3 py-2 font-mono text-sm"
+                    rows="15"
+                  />
+                ) : (
+                  <div className="bg-gray-50 p-4 rounded border whitespace-pre-line text-sm">
+                    {treatmentPlan}
+                  </div>
+                )}
+
+                <div className="mt-4">
+                  <label className="block text-sm font-medium mb-1">Additional Clinician Notes</label>
+                  <textarea 
+                    value={clinicianNotes}
+                    onChange={(e) => setClinicianNotes(e.target.value)}
+                    className="w-full border rounded px-3 py-2"
+                    rows="3"
+                    placeholder="Add any additional notes or modifications..."
+                  />
+                </div>
+
+                <div className="mt-6 bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4">
+                  <div className="flex items-start">
+                    <input 
+                      type="checkbox"
+                      checked={signedOff}
+                      onChange={(e) => setSignedOff(e.target.checked)}
+                      className="mt-1 mr-3"
+                      id="signoff"
+                    />
+                    <label htmlFor="signoff" className="text-sm">
+                      <span className="font-bold">Clinician Sign-off Required:</span> I have reviewed the AI-generated findings and treatment plan, made necessary modifications, and take full clinical responsibility for this report.
+                    </label>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={generateReport}
+                  disabled={!signedOff}
+                  className={`w-full mt-4 py-3 rounded-lg font-semibold flex items-center justify-center ${
+                    signedOff 
+                      ? 'bg-green-600 text-white hover:bg-green-700' 
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  <Download className="w-5 h-5 mr-2" />
+                  Export Final Report
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="bg-gray-800 text-white text-center py-4 mt-8">
+        <p className="text-sm">AI X-ray Diagnostic Reader v1.0 | Research Prototype Only</p>
+        <p className="text-xs text-gray-400 mt-1">Not for clinical use without physician oversight | All decisions require clinician approval</p>
+      </div>
+    </div>
+  );
+};
+
+export default XrayDiagnosticTool;
