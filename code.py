@@ -235,8 +235,9 @@ with tab1:
             
             st.divider()
             
-            if st.button("🔍 Proceed to Analysis", type="primary", use_container_width=True):
+            if st.button("🔍 Proceed to Analysis", type="primary", use_container_width=True, key="proceed_to_analysis"):
                 st.session_state.step = 2
+                st.switch_page = 2
                 st.rerun()
 
 # TAB 2: AI Analysis
@@ -305,7 +306,7 @@ with tab2:
             for i, dx in enumerate(st.session_state.results['differentials'], 1):
                 st.write(f"{i}. {dx}")
             
-            if st.button("📋 Proceed to Patient Context", type="primary", use_container_width=True):
+            if st.button("📋 Proceed to Patient Context", type="primary", use_container_width=True, key="proceed_to_context"):
                 st.session_state.step = 3
                 st.rerun()
 
@@ -341,7 +342,7 @@ with tab3:
         with col3:
             spo2 = st.text_input("SpO2 (%)", placeholder="98")
         
-        if st.button("💾 Save Context & Generate Plan", type="primary", use_container_width=True):
+        if st.button("💾 Save Context & Generate Plan", type="primary", use_container_width=True, key="save_context_btn"):
             st.session_state.patient_context = {
                 'age': age,
                 'sex': sex,
@@ -375,9 +376,8 @@ with tab3:
 
 ⚠️ CLINICIAN REVIEW REQUIRED - This is a draft plan for editing"""
             
-            st.session_state.step = max(st.session_state.step, 4)
-            st.success("✅ Context saved! Proceeding to treatment plan...")
-            time.sleep(1)
+            st.session_state.step = 4
+            st.success("✅ Context saved!")
             st.rerun()
 
 # TAB 4: Treatment Plan
@@ -422,16 +422,16 @@ with tab4:
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("💾 Save Plan", type="secondary", use_container_width=True):
+            if st.button("💾 Save Plan", type="secondary", use_container_width=True, key="save_plan_btn"):
                 st.success("✅ Treatment plan saved!")
         
         with col2:
             if signed_off:
-                if st.button("📄 Proceed to Export", type="primary", use_container_width=True):
+                if st.button("📄 Proceed to Export", type="primary", use_container_width=True, key="proceed_to_export"):
                     st.session_state.step = 5
                     st.rerun()
             else:
-                st.button("📄 Proceed to Export", type="primary", disabled=True, use_container_width=True)
+                st.button("📄 Proceed to Export", type="primary", disabled=True, use_container_width=True, key="proceed_to_export_disabled")
                 st.caption("⚠️ Sign-off required to proceed")
 
 # TAB 5: Export
@@ -525,12 +525,12 @@ Analysis Timestamp: {st.session_state.results['timestamp']}
             )
         
         with col2:
-            if st.button("📋 Show Full Report", type="secondary", use_container_width=True):
+            if st.button("📋 Show Full Report", type="secondary", use_container_width=True, key="show_report_btn"):
                 st.code(report, language=None)
         
         with col3:
             # Reset app
-            if st.button("🔄 Start New Analysis", type="secondary", use_container_width=True):
+            if st.button("🔄 Start New Analysis", type="secondary", use_container_width=True, key="reset_app_btn"):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
