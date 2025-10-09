@@ -1,19 +1,13 @@
 """
-AI X-ray Diagnostic Reader - Streamlit Version
-Research Prototype - Requires clinician review
+AI X-ray Diagnostic Reader - Streamlit App
+GitHub ready version with minimal dependencies
 
-Installation:
-pip install streamlit numpy pillow matplotlib
-
-Usage:
-streamlit run xray_diagnostic_app.py
+File: app.py
 """
 
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageEnhance, ImageDraw
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+from PIL import Image, ImageEnhance, ImageDraw, ImageFont
 from datetime import datetime
 import io
 import time
@@ -56,6 +50,12 @@ st.markdown("""
     .stButton>button {
         width: 100%;
     }
+    .metric-card {
+        background: #f3f4f6;
+        padding: 1rem;
+        border-radius: 8px;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,53 +70,10 @@ if 'treatment_plan' not in st.session_state:
     st.session_state.treatment_plan = ""
 if 'step' not in st.session_state:
     st.session_state.step = 1
-
-# Header
-st.markdown("""
-<div class="main-header">
-    <h1>🏥 AI X-ray Diagnostic Reader</h1>
-    <p><strong>Doctor-in-the-Loop System v1.0</strong></p>
-    <div class="warning-box">
-        ⚠️ RESEARCH PROTOTYPE ONLY - Not for clinical use without physician oversight
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Progress indicator
-progress_steps = ["Upload", "Analyze", "Context", "Plan", "Export"]
-cols = st.columns(len(progress_steps))
-for idx, (col, step) in enumerate(zip(cols, progress_steps)):
-    with col:
-        if idx + 1 < st.session_state.step:
-            st.success(f"✅ {step}")
-        elif idx + 1 == st.session_state.step:
-            st.info(f"▶️ {step}")
-        else:
-            st.text(f"⏸️ {step}")
-
-st.divider()
-
-# Sidebar
-with st.sidebar:
-    st.header("📊 Current Status")
-    st.write(f"**Step:** {st.session_state.step}/5")
-    
-    if st.session_state.image:
-        st.success("✅ Image uploaded")
-    else:
-        st.warning("⏳ No image")
-    
-    if st.session_state.results:
-        st.success("✅ Analysis complete")
-    else:
-        st.warning("⏳ Not analyzed")
-    
-    st.divider()
-    st.header("🎨 Image Adjustments")
-    brightness = st.slider("Brightness", 0.5, 2.0, 1.0, 0.1)
-    contrast = st.slider("Contrast", 0.5, 2.0, 1.0, 0.1)
-    zoom = st.slider("Zoom", 0.5, 3.0, 1.0, 0.25)
-    show_overlay = st.checkbox("Show AI Overlay", value=True)
+if 'clinician_notes' not in st.session_state:
+    st.session_state.clinician_notes = ""
+if 'signed_off' not in st.session_state:
+    st.session_state.signed_off = False
 
 # Mock AI analysis function
 def mock_ai_analysis():
@@ -157,14 +114,93 @@ def mock_ai_analysis():
         'auroc': 0.87
     }
 
-# Main content
+def draw_annotations(image, results):
+    """Draw bounding boxes on image"""
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    
+    for finding in results['findings']:
+        r = finding['region']
+        x1, y1 = int(r['x'] * w), int(r['y'] * h)
+        x2, y2 = int((r['x'] + r['w']) * w), int((r['y'] + r['h']) * h)
+        
+        # Draw rectangle
+        draw.rectangle([x1, y1, x2, y2], outline='red', width=3)
+        
+        # Draw label background
+        label = finding['name']
+        bbox = draw.textbbox((x1, y1), label)
+        draw.rectangle([x1, y1-25, x1+150, y1], fill='red')
+        draw.text((x1+5, y1-20), label, fill='white')
+    
+    return img
+
+# Header
+st.markdown("""
+<div class="main-header">
+    <h1>🏥 AI X-ray Diagnostic Reader</h1>
+    <p><strong>Doctor-in-the-Loop System v1.0</strong></p>
+    <div class="warning-box">
+        ⚠️ RESEARCH PROTOTYPE ONLY - Not for clinical use without physician oversight
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Progress indicator
+progress_steps = ["Upload", "Analyze", "Context", "Plan", "Export"]
+cols = st.columns(len(progress_steps))
+for idx, (col, step_name) in enumerate(zip(cols, progress_steps)):
+    with col:
+        if idx + 1 < st.session_state.step:
+            st.success(f"✅ {step_name}")
+        elif idx + 1 == st.session_state.step:
+            st.info(f"▶️ {step_name}")
+        else:
+            st.text(f"⏸️ {step_name}")
+
+st.divider()
+
+# Sidebar
+with st.sidebar:
+    st.header("📊 Current Status")
+    st.write(f"**Step:** {st.session_state.step}/5")
+    
+    if st.session_state.image:
+        st.success("✅ Image uploaded")
+    else:
+        st.warning("⏳ No image")
+    
+    if st.session_state.results:
+        st.success("✅ Analysis complete")
+    else:
+        st.warning("⏳ Not analyzed")
+    
+    st.divider()
+    st.header("🎨 Image Adjustments")
+    brightness = st.slider("Brightness", 0.5, 2.0, 1.0, 0.1)
+    contrast = st.slider("Contrast", 0.5, 2.0, 1.0, 0.1)
+    show_overlay = st.checkbox("Show AI Overlay", value=True)
+    
+    st.divider()
+    st.markdown("### 📖 About")
+    st.markdown("""
+    This tool uses AI to assist radiologists in analyzing chest X-rays.
+    
+    **Features:**
+    - AI-powered finding detection
+    - Evidence-based treatment plans
+    - Full clinician oversight
+    """)
+
+# Main content tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📁 Upload", "🤖 AI Analysis", "📋 Patient Context", "💊 Treatment Plan", "📄 Export"])
 
 # TAB 1: Upload
 with tab1:
     st.header("Step 1: Upload X-ray Image")
     
-    uploaded_file = st.file_uploader("Choose an X-ray image", type=['png', 'jpg', 'jpeg', 'dcm'])
+    uploaded_file = st.file_uploader("Choose an X-ray image", type=['png', 'jpg', 'jpeg'])
     
     if uploaded_file is not None:
         st.session_state.image = Image.open(uploaded_file)
@@ -182,28 +218,24 @@ with tab1:
             
             # Display with overlay if results exist
             if st.session_state.results and show_overlay:
-                draw = ImageDraw.Draw(img)
-                w, h = img.size
-                
-                for finding in st.session_state.results['findings']:
-                    r = finding['region']
-                    x1, y1 = int(r['x'] * w), int(r['y'] * h)
-                    x2, y2 = int((r['x'] + r['w']) * w), int((r['y'] + r['h']) * h)
-                    
-                    # Draw rectangle
-                    draw.rectangle([x1, y1, x2, y2], outline='red', width=3)
-                    # Draw label
-                    draw.rectangle([x1, y1-25, x1+150, y1], fill='red')
-                    draw.text((x1+5, y1-20), finding['name'], fill='white')
+                img = draw_annotations(img, st.session_state.results)
             
             st.image(img, caption='X-ray Image', use_container_width=True)
         
         with col2:
-            st.metric("Image Size", f"{st.session_state.image.size[0]} x {st.session_state.image.size[1]}")
-            st.metric("Mode", st.session_state.image.mode)
-            st.metric("Format", uploaded_file.type)
+            st.markdown("""
+            <div class="metric-card">
+                <h3>📏 Image Info</h3>
+            </div>
+            """, unsafe_allow_html=True)
             
-            if st.button("🔍 Proceed to Analysis", type="primary", key="proceed_analyze"):
+            st.metric("Width", f"{st.session_state.image.size[0]} px")
+            st.metric("Height", f"{st.session_state.image.size[1]} px")
+            st.metric("Mode", st.session_state.image.mode)
+            
+            st.divider()
+            
+            if st.button("🔍 Proceed to Analysis", type="primary", use_container_width=True):
                 st.session_state.step = 2
                 st.rerun()
 
@@ -214,7 +246,7 @@ with tab2:
     if st.session_state.image is None:
         st.warning("⚠️ Please upload an image first!")
     else:
-        if st.button("🤖 Run AI Analysis", type="primary", key="run_analysis"):
+        if st.button("🤖 Run AI Analysis", type="primary", use_container_width=True):
             with st.spinner("Running DenseNet-121 inference..."):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -273,7 +305,7 @@ with tab2:
             for i, dx in enumerate(st.session_state.results['differentials'], 1):
                 st.write(f"{i}. {dx}")
             
-            if st.button("📋 Proceed to Patient Context", type="primary"):
+            if st.button("📋 Proceed to Patient Context", type="primary", use_container_width=True):
                 st.session_state.step = 3
                 st.rerun()
 
@@ -309,7 +341,7 @@ with tab3:
         with col3:
             spo2 = st.text_input("SpO2 (%)", placeholder="98")
         
-        if st.button("💾 Save Context & Generate Plan", type="primary", key="save_context"):
+        if st.button("💾 Save Context & Generate Plan", type="primary", use_container_width=True):
             st.session_state.patient_context = {
                 'age': age,
                 'sex': sex,
@@ -370,10 +402,12 @@ with tab4:
         
         clinician_notes = st.text_area(
             "Additional Clinician Notes",
+            value=st.session_state.clinician_notes,
             placeholder="Add any additional notes, modifications, or considerations...",
-            height=150,
-            key="clinician_notes"
+            height=150
         )
+        
+        st.session_state.clinician_notes = clinician_notes
         
         st.divider()
         
@@ -381,37 +415,36 @@ with tab4:
         signed_off = st.checkbox(
             "I have reviewed the AI-generated findings and treatment plan, made necessary modifications, "
             "and take full clinical responsibility for this report.",
-            key="signoff"
+            value=st.session_state.signed_off
         )
+        
+        st.session_state.signed_off = signed_off
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("💾 Save Plan", type="secondary", key="save_plan"):
+            if st.button("💾 Save Plan", type="secondary", use_container_width=True):
                 st.success("✅ Treatment plan saved!")
         
         with col2:
             if signed_off:
-                if st.button("📄 Proceed to Export", type="primary", key="proceed_export"):
+                if st.button("📄 Proceed to Export", type="primary", use_container_width=True):
                     st.session_state.step = 5
-                    st.session_state.clinician_notes = clinician_notes
-                    st.session_state.signed_off = True
                     st.rerun()
             else:
-                st.button("📄 Proceed to Export", type="primary", disabled=True, key="proceed_export_disabled")
+                st.button("📄 Proceed to Export", type="primary", disabled=True, use_container_width=True)
                 st.caption("⚠️ Sign-off required to proceed")
 
 # TAB 5: Export
 with tab5:
     st.header("Step 5: Export Final Report")
     
-    if not st.session_state.get('signed_off', False):
+    if not st.session_state.signed_off:
         st.warning("⚠️ Clinician sign-off required before export!")
     else:
         st.success("✅ Report ready for export")
         
         # Generate report content
-        report = f"""
-{'='*70}
+        report = f"""{'='*70}
 AI X-RAY DIAGNOSTIC REPORT
 {'='*70}
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -462,7 +495,7 @@ Analysis Timestamp: {st.session_state.results['timestamp']}
         report += f"\n{'='*70}\n"
         report += "CLINICIAN NOTES\n"
         report += f"{'='*70}\n"
-        report += st.session_state.get('clinician_notes', 'None') + "\n"
+        report += st.session_state.clinician_notes or 'None' + "\n"
         
         report += f"\n{'='*70}\n"
         report += "AUDIT TRAIL\n"
@@ -476,7 +509,7 @@ Analysis Timestamp: {st.session_state.results['timestamp']}
         report += f"{'='*70}\n"
         
         # Display report
-        st.text_area("Final Report", value=report, height=400, key="final_report")
+        st.text_area("Final Report", value=report, height=400, key="final_report_display")
         
         col1, col2, col3 = st.columns(3)
         
@@ -487,18 +520,17 @@ Analysis Timestamp: {st.session_state.results['timestamp']}
                 data=report,
                 file_name=f"xray_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain",
-                type="primary"
+                type="primary",
+                use_container_width=True
             )
         
         with col2:
-            # Copy to clipboard
-            if st.button("📋 Copy to Clipboard", type="secondary"):
+            if st.button("📋 Show Full Report", type="secondary", use_container_width=True):
                 st.code(report, language=None)
-                st.info("Report displayed above - use your browser's copy function")
         
         with col3:
             # Reset app
-            if st.button("🔄 Start New Analysis", type="secondary"):
+            if st.button("🔄 Start New Analysis", type="secondary", use_container_width=True):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
@@ -510,8 +542,7 @@ st.markdown("""
     <p><strong>AI X-ray Diagnostic Reader v1.0</strong> | Research Prototype Only</p>
     <p style='font-size: 0.9em;'>Not for clinical use without physician oversight | All decisions require clinician approval</p>
     <p style='font-size: 0.8em; margin-top: 1rem;'>
-        Model: DenseNet-121-CheXpert | AUROC: 0.87 | 
-        <a href='#'>Documentation</a> | <a href='#'>Support</a>
+        Model: DenseNet-121-CheXpert | AUROC: 0.87
     </p>
 </div>
 """, unsafe_allow_html=True)
