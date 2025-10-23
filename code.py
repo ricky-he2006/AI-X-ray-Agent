@@ -1,280 +1,291 @@
-"""
-AI X-ray Diagnostic Reader - REAL AI Implementation
-Integrated with actual PyTorch models
-
-File: app_real.py
-
-Setup:
-1. pip install -r requirements.txt
-2. Download model weights (see ai_models.py)
-3. streamlit run app_real.py
-"""
 import streamlit as st
-import numpy as np
-from PIL import Image, ImageEnhance, ImageDraw
-from datetime import datetime
+import requests
+import base64
+from PIL import Image
+import io
+import json
 
-# Import real AI models
-try:
-    from ai_models import UniversalXrayAnalyzer
-    REAL_AI_AVAILABLE = True
-except ImportError as e:
-    st.error(f"⚠️ AI models not available: {e}")
-    st.info("Install dependencies: pip install torch torchvision opencv-python")
-    REAL_AI_AVAILABLE = False
+# Configuration
+EDGE_FUNCTION_URL = "https://iasahsykxifpqejjsawk.supabase.co/functions/v1/analyze-xray"
 
-# Page configuration
+# Page config
 st.set_page_config(
-    page_title="AI X-ray Diagnostic Reader - REAL AI",
+    page_title="AI X-Ray Analyzer",
     page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # Custom CSS
 st.markdown("""
 <style>
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
     .main-header {
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+        background: white;
         padding: 2rem;
         border-radius: 10px;
-        color: white;
         margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .warning-box {
-        background-color: #dc2626;
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        font-weight: bold;
-        margin-top: 1rem;
-    }
-    .finding-box {
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-        border-left: 4px solid;
-    }
-    .critical { background-color: #fee; border-color: #dc2626; }
-    .moderate { background-color: #fef3c7; border-color: #f59e0b; }
-    .mild { background-color: #fef9c3; border-color: #eab308; }
-    .none { background-color: #e0f2fe; border-color: #0ea5e9; }
-    .metric-card {
-        background: #f3f4f6;
-        padding: 1rem;
-        border-radius: 8px;
-        text-align: center;
-    }
-    .body-region-box {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
+    .result-card {
+        background: white;
         padding: 1.5rem;
-        border-radius: 10px;
+        border-radius: 8px;
         margin: 1rem 0;
-        font-size: 1.2em;
-        font-weight: bold;
-        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .ai-badge {
-        background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-size: 0.9em;
-        font-weight: bold;
-        display: inline-block;
+    .finding-card {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 6px;
         margin: 0.5rem 0;
+        border-left: 4px solid #667eea;
+    }
+    .critical {
+        border-left-color: #dc3545;
+    }
+    .moderate {
+        border-left-color: #fd7e14;
+    }
+    .mild {
+        border-left-color: #20c997;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- Initialize session state ---
-keys = [
-    "image", "body_region", "results", "patient_context",
-    "treatment_plan", "current_page", "clinician_notes", "signed_off"
-]
-for key in keys:
-    if key not in st.session_state:
-        st.session_state[key] = None if key not in ["current_page"] else "upload"
+# Header
+st.markdown('<div class="main-header">', unsafe_allow_html=True)
+st.title("🏥 AI X-Ray Analyzer")
+st.markdown("Advanced medical imaging analysis powered by AI")
+st.markdown('</div>', unsafe_allow_html=True)
 
-if "analyzer" not in st.session_state and REAL_AI_AVAILABLE:
-    with st.spinner("Loading AI models..."):
-        st.session_state.analyzer = UniversalXrayAnalyzer()
+# Initialize session state
+if 'analysis_result' not in st.session_state:
+    st.session_state.analysis_result = None
+if 'patient_info' not in st.session_state:
+    st.session_state.patient_info = None
+if 'xray_image' not in st.session_state:
+    st.session_state.xray_image = None
 
-# --- Helper Functions ---
-def generate_treatment_plan(body_region, findings, patient_context):
-    plans = {
-        "chest": """Based on chest imaging findings and clinical context:
+# Step 1: Patient Information
+st.markdown('<div class="result-card">', unsafe_allow_html=True)
+st.header("Step 1: Patient Information")
 
-1. Respiratory Management:
-   - Antibiotic Therapy: Consider empiric treatment for community-acquired pneumonia (CAP)
-   - First-line: Amoxicillin-clavulanate 875mg BID or Azithromycin 500mg daily
-   - Reference: IDSA/ATS CAP Guidelines 2019
+with st.form("patient_info_form"):
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        name = st.text_input("Patient Name *", placeholder="John Doe")
+        age = st.number_input("Age *", min_value=0, max_value=120, value=35)
+    
+    with col2:
+        gender = st.selectbox("Gender *", ["", "Male", "Female", "Other"])
+    
+    symptoms = st.text_area("Current Symptoms", 
+                           placeholder="Describe current symptoms (e.g., chest pain, difficulty breathing...)")
+    
+    medical_history = st.text_area("Medical History",
+                                   placeholder="Any relevant medical history...")
+    
+    medications = st.text_area("Current Medications",
+                              placeholder="List current medications...")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        submit_with_info = st.form_submit_button("Continue with Patient Info", use_container_width=True)
+    with col2:
+        skip_info = st.form_submit_button("Skip (Analysis Only)", use_container_width=True)
+    
+    if submit_with_info and name and age and gender:
+        st.session_state.patient_info = {
+            "name": name,
+            "age": str(age),
+            "gender": gender.lower(),
+            "symptoms": symptoms,
+            "medicalHistory": medical_history,
+            "currentMedications": medications
+        }
+        st.success(f"Patient info saved for {name}")
+    
+    if skip_info:
+        st.session_state.patient_info = None
+        st.info("Continuing without patient information")
 
-2. Cardiac Evaluation: If cardiomegaly present
-   - Obtain BNP/NT-proBNP
-   - Consider echocardiogram if CHF suspected
-   - Reference: ACC/AHA Heart Failure Guidelines 2022
+st.markdown('</div>', unsafe_allow_html=True)
 
-3. Monitoring & Follow-up:
-   - Repeat chest X-ray in 48-72 hours if no improvement
-   - Monitor vital signs, especially oxygen saturation
-   - Consider chest CT if diagnostic uncertainty persists
+# Step 2: X-Ray Upload
+st.markdown('<div class="result-card">', unsafe_allow_html=True)
+st.header("Step 2: Upload X-Ray Image")
 
-⚠️ CLINICIAN REVIEW REQUIRED""",
-        "hand": """Based on extremity imaging findings and clinical context:
+uploaded_file = st.file_uploader("Choose an X-ray image...", type=['jpg', 'jpeg', 'png'])
 
-1. Fracture Management:
-   - Immediate immobilization with splint/cast
-   - Ice therapy: 20 minutes every 2-3 hours for 48 hours
-   - Elevation above heart level to reduce swelling
-   - NSAIDs for pain (Ibuprofen 400-600mg Q6H PRN)
-
-2. Orthopedic Referral:
-   - Urgent orthopedic consultation within 24-48 hours
-   - May require closed reduction or surgical fixation
-   - Reference: AO Fracture Classification
-
-3. Follow-up:
-   - Repeat X-rays in 10-14 days to assess alignment
-   - Physical therapy referral after immobilization period
-   - Monitor for compartment syndrome symptoms
-
-⚠️ CLINICIAN REVIEW REQUIRED"""
-    }
-    return plans.get(body_region.lower(), plans["chest"])
-
-def draw_annotations(image, results):
-    img = image.copy()
-    draw = ImageDraw.Draw(img)
-    w, h = img.size
-    if "findings" in results:
-        for f in results["findings"]:
-            if "region" in f:
-                r = f["region"]
-                x1, y1 = int(r["x"] * w), int(r["y"] * h)
-                x2, y2 = int((r["x"] + r["w"]) * w), int((r["y"] + r["h"]) * h)
-                draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
-                draw.rectangle([x1, y1 - 25, x1 + 200, y1], fill="red")
-                draw.text((x1 + 5, y1 - 20), f["name"], fill="white")
-    return img
-
-# --- HEADER ---
-st.markdown("""
-<div class="main-header">
-    <h1>🏥 AI X-ray Diagnostic Reader</h1>
-    <div class="ai-badge">🤖 REAL AI POWERED</div>
-    <p><strong>Multi-Region Analysis with PyTorch Models</strong></p>
-    <div class="warning-box">
-        ⚠️ RESEARCH PROTOTYPE ONLY - Not for clinical use without physician oversight
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# --- Ensure AI Loaded ---
-if not REAL_AI_AVAILABLE:
-    st.error("🚫 AI models not loaded. Please install dependencies and restart.")
-    st.code("pip install torch torchvision opencv-python", language="bash")
-    st.stop()
-
-# --- Sidebar ---
-with st.sidebar:
-    st.header("🩻 System Status")
-    if st.session_state.image:
-        st.success("✅ Image uploaded")
-    else:
-        st.warning("⏳ No image uploaded")
-
-    if st.session_state.results:
-        st.success("✅ AI analysis complete")
-    else:
-        st.warning("⏳ Analysis not run yet")
-
-    if st.session_state.treatment_plan:
-        st.success("✅ Treatment plan ready")
-    else:
-        st.warning("⏳ No treatment plan")
-
-    if st.session_state.signed_off:
-        st.success("✅ Clinician signed off")
-    else:
-        st.warning("⏳ Not signed off")
-
-    st.divider()
-    st.header("🎨 Image Adjustments")
-    brightness = st.slider("Brightness", 0.5, 2.0, 1.0, 0.1)
-    contrast = st.slider("Contrast", 0.5, 2.0, 1.0, 0.1)
-    show_overlay = st.checkbox("Show AI Overlay", value=True)
-
-# --- PAGE 1: Upload ---
-if st.session_state.current_page == "upload":
-    st.header("Step 1: Upload X-ray Image")
-    uploaded = st.file_uploader("Choose X-ray image", type=["png", "jpg", "jpeg"])
-    if uploaded:
-        st.session_state.image = Image.open(uploaded)
-        st.image(st.session_state.image, caption="Uploaded X-ray", use_container_width=True)
-        if st.button("🔍 Proceed to Analysis →", type="primary"):
-            st.session_state.current_page = "analyze"
-            st.rerun()
-
-# --- PAGE 2: Analysis ---
-elif st.session_state.current_page == "analyze":
-    st.header("Step 2: Real AI Analysis")
-    if not st.session_state.image:
-        st.warning("Upload an image first!")
-    else:
-        if st.button("🤖 Run AI Analysis", type="primary"):
-            with st.spinner("Running real PyTorch models..."):
+if uploaded_file is not None:
+    # Display the image
+    image = Image.open(uploaded_file)
+    st.session_state.xray_image = image
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.image(image, caption="Uploaded X-Ray", use_column_width=True)
+    
+    with col2:
+        st.info("📊 Image loaded successfully!")
+        st.write(f"**Size:** {image.size[0]} x {image.size[1]} pixels")
+        st.write(f"**Format:** {image.format}")
+        
+        if st.button("🔍 Analyze X-Ray", use_container_width=True, type="primary"):
+            with st.spinner("AI is analyzing the X-ray... This may take 30-60 seconds..."):
                 try:
-                    results = st.session_state.analyzer.analyze(st.session_state.image)
-                    st.session_state.results = results
-                    st.session_state.body_region = results["body_region"]
-                    st.success("✅ AI analysis complete!")
-                    st.session_state.current_page = "context"
-                    st.rerun()
+                    # Convert image to base64
+                    buffered = io.BytesIO()
+                    image.save(buffered, format="PNG")
+                    img_str = base64.b64encode(buffered.getvalue()).decode()
+                    img_data = f"data:image/png;base64,{img_str}"
+                    
+                    # Prepare payload
+                    payload = {
+                        "imageData": img_data,
+                        "patientInfo": st.session_state.patient_info
+                    }
+                    
+                    # Call edge function
+                    response = requests.post(
+                        EDGE_FUNCTION_URL,
+                        json=payload,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    
+                    if response.status_code == 200:
+                        st.session_state.analysis_result = response.json()
+                        st.success("✅ Analysis complete!")
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {response.status_code} - {response.text}")
+                
                 except Exception as e:
-                    st.error(f"❌ Analysis failed: {e}")
+                    st.error(f"Error during analysis: {str(e)}")
 
-# --- PAGE 3: Context ---
-elif st.session_state.current_page == "context":
-    st.header("Step 3: Patient Context")
-    age = st.number_input("Age", 0, 120, 30)
-    sex = st.selectbox("Sex", ["Male", "Female", "Other"])
-    symptoms = st.text_area("Symptoms")
-    if st.button("💊 Generate Plan →", type="primary"):
-        st.session_state.patient_context = {"age": age, "sex": sex, "symptoms": symptoms}
-        st.session_state.treatment_plan = generate_treatment_plan(
-            st.session_state.body_region, st.session_state.results["findings"], st.session_state.patient_context
-        )
-        st.session_state.current_page = "plan"
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Step 3: Display Results
+if st.session_state.analysis_result:
+    result = st.session_state.analysis_result
+    
+    # Header Card
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+    st.header("📋 Analysis Results")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Body Region", result['body_region'])
+    with col2:
+        st.metric("Confidence", f"{result['region_confidence']*100:.1f}%")
+    with col3:
+        urgency_emoji = {"critical": "🚨", "moderate": "⚠️", "low": "✅"}
+        st.metric("Urgency", f"{urgency_emoji.get(result['urgency'], '❓')} {result['urgency'].upper()}")
+    with col4:
+        st.metric("Model Accuracy", f"{result['auroc']*100:.1f}%")
+    
+    st.markdown(f"**Model:** {result['model_version']}")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Findings
+    if result.get('findings'):
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader(f"🔍 Clinical Findings ({len(result['findings'])})")
+        
+        for finding in result['findings']:
+            severity_class = finding['severity']
+            severity_color = {
+                'critical': '🔴',
+                'moderate': '🟠',
+                'mild': '🟢',
+                'none': '⚪'
+            }
+            
+            st.markdown(f"""
+            <div class="finding-card {severity_class}">
+                <h4>{severity_color.get(finding['severity'], '❓')} {finding['name']}</h4>
+                <p><strong>Severity:</strong> {finding['severity'].upper()}</p>
+                <p><strong>Confidence:</strong> {finding['confidence']*100:.1f}%</p>
+                <p>{finding['description']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Differential Diagnoses
+    if result.get('differentials'):
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader("📊 Differential Diagnoses")
+        for i, diff in enumerate(result['differentials'], 1):
+            st.markdown(f"{i}. {diff}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Treatment Plan
+    if result.get('treatment_plan'):
+        tp = result['treatment_plan']
+        
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader("💊 Recommended Treatment Plan")
+        
+        if st.session_state.patient_info:
+            st.info(f"Personalized for: {st.session_state.patient_info['name']}, {st.session_state.patient_info['age']} years old")
+        
+        # Immediate Actions
+        if tp.get('immediate_actions'):
+            st.markdown("#### 🚨 Immediate Actions Required")
+            for action in tp['immediate_actions']:
+                st.markdown(f"- {action}")
+        
+        # Recommended Tests
+        if tp.get('recommended_tests'):
+            st.markdown("#### 🔬 Additional Tests Recommended")
+            for test in tp['recommended_tests']:
+                st.markdown(f"- {test}")
+        
+        # Medications
+        if tp.get('medication_suggestions'):
+            st.markdown("#### 💊 Medication Considerations")
+            for med in tp['medication_suggestions']:
+                st.markdown(f"- {med}")
+        
+        # Lifestyle
+        if tp.get('lifestyle_recommendations'):
+            st.markdown("#### ❤️ Lifestyle Recommendations")
+            for rec in tp['lifestyle_recommendations']:
+                st.markdown(f"- {rec}")
+        
+        # Follow-up
+        if tp.get('follow_up'):
+            st.markdown("#### 📅 Follow-up Schedule")
+            st.markdown(tp['follow_up'])
+        
+        # Specialist
+        if tp.get('specialist_referral'):
+            st.markdown("#### 👨‍⚕️ Specialist Consultation")
+            st.markdown(tp['specialist_referral'])
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Start Over Button
+    if st.button("🔄 Analyze Another X-Ray", use_container_width=True):
+        st.session_state.analysis_result = None
+        st.session_state.patient_info = None
+        st.session_state.xray_image = None
         st.rerun()
+    
+    # Disclaimer
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+    st.warning("""
+    ⚠️ **Medical Disclaimer:** This AI analysis and treatment recommendations are for 
+    educational and research purposes only. They should not be used as a substitute for 
+    professional medical advice, diagnosis, or treatment. Always consult with qualified 
+    healthcare professionals before making any medical decisions.
+    """)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# --- PAGE 4: Plan ---
-elif st.session_state.current_page == "plan":
-    st.header("Step 4: Treatment Plan")
-    plan = st.text_area("Treatment Plan", st.session_state.treatment_plan or "", height=300)
-    st.session_state.treatment_plan = plan
-    signed = st.checkbox("Clinician sign-off", st.session_state.signed_off or False)
-    st.session_state.signed_off = signed
-    if signed and st.button("📄 Proceed to Export →", type="primary"):
-        st.session_state.current_page = "export"
-        st.rerun()
-
-# --- PAGE 5: Export ---
-elif st.session_state.current_page == "export":
-    st.header("Step 5: Export Report")
-    if not st.session_state.signed_off:
-        st.warning("⚠️ Clinician sign-off required")
-    else:
-        report = f"AI X-ray Report for {st.session_state.body_region}\nGenerated: {datetime.now()}"
-        st.text_area("Final Report", value=report, height=300)
-        st.download_button("📥 Download Report", report, file_name="xray_report.txt")
-
-# --- Footer ---
-st.divider()
-st.markdown("""
-<div style='text-align:center; color:#666; padding:1rem;'>
-    <p><strong>AI X-ray Diagnostic Reader v2.0 - Real PyTorch Implementation</strong></p>
-    <p>Research Prototype | Not for clinical use</p>
-</div>
-""", unsafe_allow_html=True)
+# Footer
+st.markdown("---")
+st.markdown("Powered by Lovable AI • For research and educational purposes only")
