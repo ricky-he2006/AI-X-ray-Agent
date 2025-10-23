@@ -247,7 +247,7 @@ st.divider()
 
 # Sidebar
 with st.sidebar:
-    st.header("📊 System Status")
+    st.header(" System Status")
     
     # AI Status
     st.markdown("### 🤖 AI Models")
@@ -676,7 +676,7 @@ st.markdown(f"""
         Research Prototype | Not for clinical use without physician oversight
     </p>
 </div>
-""", unsafe_allow_html=True)📊 Analysis Status")
+""", unsafe_allow_html=True) Analysis Status")
     
     if st.session_state.image:
         st.success("✅ Image uploaded")
