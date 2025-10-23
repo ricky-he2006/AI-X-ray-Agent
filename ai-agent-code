@@ -1,205 +1,291 @@
-"""
-AI X-ray Diagnostic Reader - All-In-One Streamlit App
------------------------------------------------------
-No external files needed. Works locally or on Streamlit Cloud.
-
-Run:
-    pip install streamlit torch torchvision pillow numpy
-    streamlit run app_allinone.py
-"""
-
 import streamlit as st
-from PIL import Image, ImageDraw
-import numpy as np
-from datetime import datetime
+import requests
+import base64
+from PIL import Image
+import io
+import json
 
-# Try importing torch; fallback to fake mode if unavailable
-try:
-    import torch
-    import torchvision.transforms as T
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+# Configuration
+EDGE_FUNCTION_URL = "https://iasahsykxifpqejjsawk.supabase.co/functions/v1/analyze-xray"
 
+# Page config
+st.set_page_config(
+    page_title="AI X-Ray Analyzer",
+    page_icon="🏥",
+    layout="wide"
+)
 
-# ---------------------------------------------------------------------
-# UNIVERSAL X-RAY ANALYZER (integrated here)
-# ---------------------------------------------------------------------
-class UniversalXrayAnalyzer:
-    def __init__(self):
-        self.labels = ["Normal", "Pneumonia", "Fracture"]
-        self.body_regions = ["Chest", "Hand"]
-
-        if TORCH_AVAILABLE:
-            import torch.nn as nn
-            self.model = nn.Sequential(
-                nn.Flatten(),
-                nn.Linear(224 * 224 * 3, 128),
-                nn.ReLU(),
-                nn.Linear(128, 3),
-                nn.Softmax(dim=1)
-            )
-        else:
-            self.model = None
-
-    def preprocess(self, image):
-        img = Image.open(image).convert("RGB").resize((224, 224))
-        if TORCH_AVAILABLE:
-            transform = T.ToTensor()
-            return transform(img).unsqueeze(0)
-        return np.array(img).reshape(1, -1) / 255.0
-
-    def analyze(self, image):
-        # Simplified heuristic for demonstration
-        body_region = "Chest" if np.random.rand() > 0.5 else "Hand"
-        x = self.preprocess(image)
-
-        if TORCH_AVAILABLE:
-            with torch.no_grad():
-                preds = self.model(x)
-            probs = preds.numpy()[0]
-        else:
-            probs = np.random.dirichlet(np.ones(3))
-
-        top_idx = int(np.argmax(probs))
-        diagnosis = self.labels[top_idx]
-        confidence = float(probs[top_idx])
-
-        return {
-            "body_region": body_region,
-            "findings": [
-                {"name": diagnosis, "confidence": f"{confidence*100:.2f}%"}
-            ],
-            "summary": f"AI suggests **{diagnosis}** ({confidence*100:.1f}% confidence)"
-        }
-
-
-# ---------------------------------------------------------------------
-# TREATMENT PLAN GENERATOR
-# ---------------------------------------------------------------------
-def generate_treatment_plan(body_region, findings, patient_context):
-    plans = {
-        "chest": """Based on chest imaging findings and clinical context:
-
-1. **Respiratory Management**
-   - Empiric antibiotics for possible pneumonia
-   - Amoxicillin-clavulanate 875 mg BID × 7 days  
-   - Reference: IDSA/ATS CAP Guidelines 2019
-
-2. **Follow-up**
-   - Re-image in 48-72 h if no improvement
-   - Monitor O₂ saturation and vitals
-
-⚠️ CLINICIAN REVIEW REQUIRED""",
-        "hand": """Based on extremity imaging findings and clinical context:
-
-1. **Fracture Care**
-   - Immobilize with splint/cast  
-   - Ice 20 min q 2–3 h × 48 h  
-   - NSAIDs for pain (Ibuprofen 400 mg q 6h PRN)
-
-2. **Referral**
-   - Orthopedic consult within 24-48 h  
-   - Re-image in 10-14 days
-
-⚠️ CLINICIAN REVIEW REQUIRED"""
+# Custom CSS
+st.markdown("""
+<style>
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
-    return plans.get(body_region.lower(), plans["chest"])
+    .main-header {
+        background: white;
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .result-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .finding-card {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 6px;
+        margin: 0.5rem 0;
+        border-left: 4px solid #667eea;
+    }
+    .critical {
+        border-left-color: #dc3545;
+    }
+    .moderate {
+        border-left-color: #fd7e14;
+    }
+    .mild {
+        border-left-color: #20c997;
+    }
+</style>
+""", unsafe_allow_html=True)
 
+# Header
+st.markdown('<div class="main-header">', unsafe_allow_html=True)
+st.title("🏥 AI X-Ray Analyzer")
+st.markdown("Advanced medical imaging analysis powered by AI")
+st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------
-# STREAMLIT UI
-# ---------------------------------------------------------------------
-st.set_page_config(page_title="AI X-ray Diagnostic Reader", layout="wide")
-st.title("🩻 AI X-ray Diagnostic Reader (All-in-One)")
+# Initialize session state
+if 'analysis_result' not in st.session_state:
+    st.session_state.analysis_result = None
+if 'patient_info' not in st.session_state:
+    st.session_state.patient_info = None
+if 'xray_image' not in st.session_state:
+    st.session_state.xray_image = None
 
-st.markdown(
-    "<p style='color:red'><b>Research prototype only — not for clinical use.</b></p>",
-    unsafe_allow_html=True,
-)
+# Step 1: Patient Information
+st.markdown('<div class="result-card">', unsafe_allow_html=True)
+st.header("Step 1: Patient Information")
 
-# Initialize state
-if "analyzer" not in st.session_state:
-    st.session_state.analyzer = UniversalXrayAnalyzer()
-if "page" not in st.session_state:
-    st.session_state.page = "upload"
+with st.form("patient_info_form"):
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        name = st.text_input("Patient Name *", placeholder="John Doe")
+        age = st.number_input("Age *", min_value=0, max_value=120, value=35)
+    
+    with col2:
+        gender = st.selectbox("Gender *", ["", "Male", "Female", "Other"])
+    
+    symptoms = st.text_area("Current Symptoms", 
+                           placeholder="Describe current symptoms (e.g., chest pain, difficulty breathing...)")
+    
+    medical_history = st.text_area("Medical History",
+                                   placeholder="Any relevant medical history...")
+    
+    medications = st.text_area("Current Medications",
+                              placeholder="List current medications...")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        submit_with_info = st.form_submit_button("Continue with Patient Info", use_container_width=True)
+    with col2:
+        skip_info = st.form_submit_button("Skip (Analysis Only)", use_container_width=True)
+    
+    if submit_with_info and name and age and gender:
+        st.session_state.patient_info = {
+            "name": name,
+            "age": str(age),
+            "gender": gender.lower(),
+            "symptoms": symptoms,
+            "medicalHistory": medical_history,
+            "currentMedications": medications
+        }
+        st.success(f"Patient info saved for {name}")
+    
+    if skip_info:
+        st.session_state.patient_info = None
+        st.info("Continuing without patient information")
 
-# Sidebar
-with st.sidebar:
-    st.header("Navigation")
-    choice = st.radio(
-        "Go to:", ["Upload", "Analysis", "Patient Context", "Treatment Plan", "Export"]
-    )
-    st.session_state.page = choice.lower()
+st.markdown('</div>', unsafe_allow_html=True)
 
-# PAGE 1: Upload
-if st.session_state.page == "upload":
-    st.header("Step 1 – Upload X-ray Image")
-    uploaded = st.file_uploader("Choose X-ray image", type=["png", "jpg", "jpeg"])
-    if uploaded:
-        st.session_state.image = Image.open(uploaded)
-        st.image(st.session_state.image, caption="Uploaded X-ray", use_container_width=True)
-        st.success("Image ready. Proceed to ‘Analysis’.")
-    else:
-        st.info("Please upload an image file.")
+# Step 2: X-Ray Upload
+st.markdown('<div class="result-card">', unsafe_allow_html=True)
+st.header("Step 2: Upload X-Ray Image")
 
-# PAGE 2: Analysis
-elif st.session_state.page == "analysis":
-    st.header("Step 2 – AI Analysis")
-    if "image" not in st.session_state:
-        st.warning("Upload an image first.")
-    else:
-        if st.button("🤖 Run AI Analysis", type="primary"):
-            with st.spinner("Running AI model..."):
-                results = st.session_state.analyzer.analyze(st.session_state.image)
-            st.session_state.results = results
-            st.session_state.body_region = results["body_region"]
-            st.success("✅ AI analysis complete!")
-            st.json(results)
-        elif "results" in st.session_state:
-            st.json(st.session_state.results)
+uploaded_file = st.file_uploader("Choose an X-ray image...", type=['jpg', 'jpeg', 'png'])
 
-# PAGE 3: Patient Context
-elif st.session_state.page == "patient context":
-    st.header("Step 3 – Patient Context")
-    age = st.number_input("Age", 0, 120, 30)
-    sex = st.selectbox("Sex", ["Male", "Female", "Other"])
-    symptoms = st.text_area("Symptoms")
-    if st.button("💊 Generate Treatment Plan"):
-        st.session_state.patient_context = {"age": age, "sex": sex, "symptoms": symptoms}
-        plan = generate_treatment_plan(
-            st.session_state.body_region,
-            st.session_state.results["findings"],
-            st.session_state.patient_context,
-        )
-        st.session_state.plan = plan
-        st.success("Treatment plan generated! Check ‘Treatment Plan’ tab.")
+if uploaded_file is not None:
+    # Display the image
+    image = Image.open(uploaded_file)
+    st.session_state.xray_image = image
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.image(image, caption="Uploaded X-Ray", use_column_width=True)
+    
+    with col2:
+        st.info("📊 Image loaded successfully!")
+        st.write(f"**Size:** {image.size[0]} x {image.size[1]} pixels")
+        st.write(f"**Format:** {image.format}")
+        
+        if st.button("🔍 Analyze X-Ray", use_container_width=True, type="primary"):
+            with st.spinner("AI is analyzing the X-ray... This may take 30-60 seconds..."):
+                try:
+                    # Convert image to base64
+                    buffered = io.BytesIO()
+                    image.save(buffered, format="PNG")
+                    img_str = base64.b64encode(buffered.getvalue()).decode()
+                    img_data = f"data:image/png;base64,{img_str}"
+                    
+                    # Prepare payload
+                    payload = {
+                        "imageData": img_data,
+                        "patientInfo": st.session_state.patient_info
+                    }
+                    
+                    # Call edge function
+                    response = requests.post(
+                        EDGE_FUNCTION_URL,
+                        json=payload,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    
+                    if response.status_code == 200:
+                        st.session_state.analysis_result = response.json()
+                        st.success("✅ Analysis complete!")
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {response.status_code} - {response.text}")
+                
+                except Exception as e:
+                    st.error(f"Error during analysis: {str(e)}")
 
-# PAGE 4: Treatment Plan
-elif st.session_state.page == "treatment plan":
-    st.header("Step 4 – Treatment Plan")
-    plan = st.session_state.get("plan")
-    if not plan:
-        st.warning("Generate a plan first under ‘Patient Context’.")
-    else:
-        st.text_area("Treatment Plan", value=plan, height=300)
+st.markdown('</div>', unsafe_allow_html=True)
 
-# PAGE 5: Export
-elif st.session_state.page == "export":
-    st.header("Step 5 – Export Report")
-    if "plan" not in st.session_state:
-        st.warning("No plan to export.")
-    else:
-        report = (
-            f"AI X-ray Report — {st.session_state.body_region}\n"
-            f"Generated {datetime.now():%Y-%m-%d %H:%M:%S}\n\n"
-            f"Findings: {st.session_state.results['summary']}\n\n"
-            f"Treatment Plan:\n{st.session_state.plan}\n"
-        )
-        st.download_button("📥 Download Report", report, file_name="xray_report.txt")
-        st.code(report)
+# Step 3: Display Results
+if st.session_state.analysis_result:
+    result = st.session_state.analysis_result
+    
+    # Header Card
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+    st.header("📋 Analysis Results")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Body Region", result['body_region'])
+    with col2:
+        st.metric("Confidence", f"{result['region_confidence']*100:.1f}%")
+    with col3:
+        urgency_emoji = {"critical": "🚨", "moderate": "⚠️", "low": "✅"}
+        st.metric("Urgency", f"{urgency_emoji.get(result['urgency'], '❓')} {result['urgency'].upper()}")
+    with col4:
+        st.metric("Model Accuracy", f"{result['auroc']*100:.1f}%")
+    
+    st.markdown(f"**Model:** {result['model_version']}")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Findings
+    if result.get('findings'):
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader(f"🔍 Clinical Findings ({len(result['findings'])})")
+        
+        for finding in result['findings']:
+            severity_class = finding['severity']
+            severity_color = {
+                'critical': '🔴',
+                'moderate': '🟠',
+                'mild': '🟢',
+                'none': '⚪'
+            }
+            
+            st.markdown(f"""
+            <div class="finding-card {severity_class}">
+                <h4>{severity_color.get(finding['severity'], '❓')} {finding['name']}</h4>
+                <p><strong>Severity:</strong> {finding['severity'].upper()}</p>
+                <p><strong>Confidence:</strong> {finding['confidence']*100:.1f}%</p>
+                <p>{finding['description']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Differential Diagnoses
+    if result.get('differentials'):
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader("📊 Differential Diagnoses")
+        for i, diff in enumerate(result['differentials'], 1):
+            st.markdown(f"{i}. {diff}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Treatment Plan
+    if result.get('treatment_plan'):
+        tp = result['treatment_plan']
+        
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader("💊 Recommended Treatment Plan")
+        
+        if st.session_state.patient_info:
+            st.info(f"Personalized for: {st.session_state.patient_info['name']}, {st.session_state.patient_info['age']} years old")
+        
+        # Immediate Actions
+        if tp.get('immediate_actions'):
+            st.markdown("#### 🚨 Immediate Actions Required")
+            for action in tp['immediate_actions']:
+                st.markdown(f"- {action}")
+        
+        # Recommended Tests
+        if tp.get('recommended_tests'):
+            st.markdown("#### 🔬 Additional Tests Recommended")
+            for test in tp['recommended_tests']:
+                st.markdown(f"- {test}")
+        
+        # Medications
+        if tp.get('medication_suggestions'):
+            st.markdown("#### 💊 Medication Considerations")
+            for med in tp['medication_suggestions']:
+                st.markdown(f"- {med}")
+        
+        # Lifestyle
+        if tp.get('lifestyle_recommendations'):
+            st.markdown("#### ❤️ Lifestyle Recommendations")
+            for rec in tp['lifestyle_recommendations']:
+                st.markdown(f"- {rec}")
+        
+        # Follow-up
+        if tp.get('follow_up'):
+            st.markdown("#### 📅 Follow-up Schedule")
+            st.markdown(tp['follow_up'])
+        
+        # Specialist
+        if tp.get('specialist_referral'):
+            st.markdown("#### 👨‍⚕️ Specialist Consultation")
+            st.markdown(tp['specialist_referral'])
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Start Over Button
+    if st.button("🔄 Analyze Another X-Ray", use_container_width=True):
+        st.session_state.analysis_result = None
+        st.session_state.patient_info = None
+        st.session_state.xray_image = None
+        st.rerun()
+    
+    # Disclaimer
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+    st.warning("""
+    ⚠️ **Medical Disclaimer:** This AI analysis and treatment recommendations are for 
+    educational and research purposes only. They should not be used as a substitute for 
+    professional medical advice, diagnosis, or treatment. Always consult with qualified 
+    healthcare professionals before making any medical decisions.
+    """)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown(
-    "<hr><center><small>AI X-ray Diagnostic Reader v2.0 — Demo Only</small></center>",
-    unsafe_allow_html=True,
-)
+# Footer
+st.markdown("---")
+st.markdown("Powered by Lovable AI • For research and educational purposes only")
