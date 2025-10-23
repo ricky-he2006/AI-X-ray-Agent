@@ -1,34 +1,86 @@
-# app.py
-import streamlit as st
-from PIL import Image
-from ai_models import UniversalXrayAnalyzer
+import { useState } from 'react';
+import XrayUploader from '@/components/XrayUploader';
+import AnalysisResults from '@/components/AnalysisResults';
+import { Activity } from 'lucide-react';
 
-st.set_page_config(page_title="AI X-Ray Analyzer", layout="centered")
+export interface Finding {
+  name: string;
+  confidence: number;
+  severity: 'critical' | 'moderate' | 'mild' | 'none';
+  region: { x: number; y: number; w: number; h: number };
+  description: string;
+}
 
-st.title("🩻 Universal AI X-Ray Analyzer")
-st.markdown("Upload an X-ray image and the AI will identify the region and predict possible findings.")
+export interface AnalysisResult {
+  body_region: string;
+  region_confidence: number;
+  model_version: string;
+  timestamp: string;
+  findings: Finding[];
+  differentials: string[];
+  urgency: 'critical' | 'moderate' | 'low';
+  auroc: number;
+}
 
-uploaded_file = st.file_uploader("Upload an X-ray image (PNG, JPG, JPEG)", type=["png", "jpg", "jpeg"])
+const Index = () => {
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded X-ray", use_container_width=True)
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary">
+      {/* Header */}
+      <header className="border-b border-border/40 bg-card/50 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Activity className="w-8 h-8 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">
+                AI X-Ray Analyzer
+              </h1>
+              <p className="text-muted-foreground">
+                Advanced medical imaging analysis powered by AI
+              </p>
+            </div>
+          </div>
+        </div>
+      </header>
 
-    st.write("Running AI model... please wait ⏳")
+      {/* Main Content */}
+      <main className="container mx-auto px-4 py-8">
+        <div className="max-w-7xl mx-auto">
+          <XrayUploader
+            onAnalysisComplete={(result, image) => {
+              setAnalysisResult(result);
+              setSelectedImage(image);
+            }}
+          />
 
-    try:
-        analyzer = UniversalXrayAnalyzer()
-        result = analyzer.analyze(image)
+          {analysisResult && selectedImage && (
+            <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <AnalysisResults
+                result={analysisResult}
+                imageUrl={selectedImage}
+              />
+            </div>
+          )}
+        </div>
+      </main>
 
-        st.subheader("🧠 Analysis Results")
-        st.write(f"**Detected Region:** {result['body_region']} ({result['region_confidence']:.2f})")
+      {/* Footer */}
+      <footer className="mt-20 border-t border-border/40 bg-card/30 backdrop-blur-sm py-6">
+        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
+          <p>
+            Powered by Lovable AI • For research and educational purposes only
+          </p>
+          <p className="mt-1 text-xs">
+            This is not a substitute for professional medical advice
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+};
 
-        st.write("**Findings:**")
-        for finding in result["findings"]:
-            st.write(f"- {finding['condition']} ({finding['confidence']:.2f})")
-
-    except Exception as e:
-        st.error(f"Error: {e}")
-
-st.markdown("---")
-st.caption("Built with PyTorch • Streamlit • OpenAI GPT-5")
+export default Index;
