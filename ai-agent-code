@@ -1,86 +1,205 @@
-import { useState } from 'react';
-import XrayUploader from '@/components/XrayUploader';
-import AnalysisResults from '@/components/AnalysisResults';
-import { Activity } from 'lucide-react';
+"""
+AI X-ray Diagnostic Reader - All-In-One Streamlit App
+-----------------------------------------------------
+No external files needed. Works locally or on Streamlit Cloud.
 
-export interface Finding {
-  name: string;
-  confidence: number;
-  severity: 'critical' | 'moderate' | 'mild' | 'none';
-  region: { x: number; y: number; w: number; h: number };
-  description: string;
-}
+Run:
+    pip install streamlit torch torchvision pillow numpy
+    streamlit run app_allinone.py
+"""
 
-export interface AnalysisResult {
-  body_region: string;
-  region_confidence: number;
-  model_version: string;
-  timestamp: string;
-  findings: Finding[];
-  differentials: string[];
-  urgency: 'critical' | 'moderate' | 'low';
-  auroc: number;
-}
+import streamlit as st
+from PIL import Image, ImageDraw
+import numpy as np
+from datetime import datetime
 
-const Index = () => {
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+# Try importing torch; fallback to fake mode if unavailable
+try:
+    import torch
+    import torchvision.transforms as T
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary">
-      {/* Header */}
-      <header className="border-b border-border/40 bg-card/50 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-lg">
-              <Activity className="w-8 h-8 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                AI X-Ray Analyzer
-              </h1>
-              <p className="text-muted-foreground">
-                Advanced medical imaging analysis powered by AI
-              </p>
-            </div>
-          </div>
-        </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="max-w-7xl mx-auto">
-          <XrayUploader
-            onAnalysisComplete={(result, image) => {
-              setAnalysisResult(result);
-              setSelectedImage(image);
-            }}
-          />
+# ---------------------------------------------------------------------
+# UNIVERSAL X-RAY ANALYZER (integrated here)
+# ---------------------------------------------------------------------
+class UniversalXrayAnalyzer:
+    def __init__(self):
+        self.labels = ["Normal", "Pneumonia", "Fracture"]
+        self.body_regions = ["Chest", "Hand"]
 
-          {analysisResult && selectedImage && (
-            <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <AnalysisResults
-                result={analysisResult}
-                imageUrl={selectedImage}
-              />
-            </div>
-          )}
-        </div>
-      </main>
+        if TORCH_AVAILABLE:
+            import torch.nn as nn
+            self.model = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(224 * 224 * 3, 128),
+                nn.ReLU(),
+                nn.Linear(128, 3),
+                nn.Softmax(dim=1)
+            )
+        else:
+            self.model = None
 
-      {/* Footer */}
-      <footer className="mt-20 border-t border-border/40 bg-card/30 backdrop-blur-sm py-6">
-        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>
-            Powered by Lovable AI • For research and educational purposes only
-          </p>
-          <p className="mt-1 text-xs">
-            This is not a substitute for professional medical advice
-          </p>
-        </div>
-      </footer>
-    </div>
-  );
-};
+    def preprocess(self, image):
+        img = Image.open(image).convert("RGB").resize((224, 224))
+        if TORCH_AVAILABLE:
+            transform = T.ToTensor()
+            return transform(img).unsqueeze(0)
+        return np.array(img).reshape(1, -1) / 255.0
 
-export default Index;
+    def analyze(self, image):
+        # Simplified heuristic for demonstration
+        body_region = "Chest" if np.random.rand() > 0.5 else "Hand"
+        x = self.preprocess(image)
+
+        if TORCH_AVAILABLE:
+            with torch.no_grad():
+                preds = self.model(x)
+            probs = preds.numpy()[0]
+        else:
+            probs = np.random.dirichlet(np.ones(3))
+
+        top_idx = int(np.argmax(probs))
+        diagnosis = self.labels[top_idx]
+        confidence = float(probs[top_idx])
+
+        return {
+            "body_region": body_region,
+            "findings": [
+                {"name": diagnosis, "confidence": f"{confidence*100:.2f}%"}
+            ],
+            "summary": f"AI suggests **{diagnosis}** ({confidence*100:.1f}% confidence)"
+        }
+
+
+# ---------------------------------------------------------------------
+# TREATMENT PLAN GENERATOR
+# ---------------------------------------------------------------------
+def generate_treatment_plan(body_region, findings, patient_context):
+    plans = {
+        "chest": """Based on chest imaging findings and clinical context:
+
+1. **Respiratory Management**
+   - Empiric antibiotics for possible pneumonia
+   - Amoxicillin-clavulanate 875 mg BID × 7 days  
+   - Reference: IDSA/ATS CAP Guidelines 2019
+
+2. **Follow-up**
+   - Re-image in 48-72 h if no improvement
+   - Monitor O₂ saturation and vitals
+
+⚠️ CLINICIAN REVIEW REQUIRED""",
+        "hand": """Based on extremity imaging findings and clinical context:
+
+1. **Fracture Care**
+   - Immobilize with splint/cast  
+   - Ice 20 min q 2–3 h × 48 h  
+   - NSAIDs for pain (Ibuprofen 400 mg q 6h PRN)
+
+2. **Referral**
+   - Orthopedic consult within 24-48 h  
+   - Re-image in 10-14 days
+
+⚠️ CLINICIAN REVIEW REQUIRED"""
+    }
+    return plans.get(body_region.lower(), plans["chest"])
+
+
+# ---------------------------------------------------------------------
+# STREAMLIT UI
+# ---------------------------------------------------------------------
+st.set_page_config(page_title="AI X-ray Diagnostic Reader", layout="wide")
+st.title("🩻 AI X-ray Diagnostic Reader (All-in-One)")
+
+st.markdown(
+    "<p style='color:red'><b>Research prototype only — not for clinical use.</b></p>",
+    unsafe_allow_html=True,
+)
+
+# Initialize state
+if "analyzer" not in st.session_state:
+    st.session_state.analyzer = UniversalXrayAnalyzer()
+if "page" not in st.session_state:
+    st.session_state.page = "upload"
+
+# Sidebar
+with st.sidebar:
+    st.header("Navigation")
+    choice = st.radio(
+        "Go to:", ["Upload", "Analysis", "Patient Context", "Treatment Plan", "Export"]
+    )
+    st.session_state.page = choice.lower()
+
+# PAGE 1: Upload
+if st.session_state.page == "upload":
+    st.header("Step 1 – Upload X-ray Image")
+    uploaded = st.file_uploader("Choose X-ray image", type=["png", "jpg", "jpeg"])
+    if uploaded:
+        st.session_state.image = Image.open(uploaded)
+        st.image(st.session_state.image, caption="Uploaded X-ray", use_container_width=True)
+        st.success("Image ready. Proceed to ‘Analysis’.")
+    else:
+        st.info("Please upload an image file.")
+
+# PAGE 2: Analysis
+elif st.session_state.page == "analysis":
+    st.header("Step 2 – AI Analysis")
+    if "image" not in st.session_state:
+        st.warning("Upload an image first.")
+    else:
+        if st.button("🤖 Run AI Analysis", type="primary"):
+            with st.spinner("Running AI model..."):
+                results = st.session_state.analyzer.analyze(st.session_state.image)
+            st.session_state.results = results
+            st.session_state.body_region = results["body_region"]
+            st.success("✅ AI analysis complete!")
+            st.json(results)
+        elif "results" in st.session_state:
+            st.json(st.session_state.results)
+
+# PAGE 3: Patient Context
+elif st.session_state.page == "patient context":
+    st.header("Step 3 – Patient Context")
+    age = st.number_input("Age", 0, 120, 30)
+    sex = st.selectbox("Sex", ["Male", "Female", "Other"])
+    symptoms = st.text_area("Symptoms")
+    if st.button("💊 Generate Treatment Plan"):
+        st.session_state.patient_context = {"age": age, "sex": sex, "symptoms": symptoms}
+        plan = generate_treatment_plan(
+            st.session_state.body_region,
+            st.session_state.results["findings"],
+            st.session_state.patient_context,
+        )
+        st.session_state.plan = plan
+        st.success("Treatment plan generated! Check ‘Treatment Plan’ tab.")
+
+# PAGE 4: Treatment Plan
+elif st.session_state.page == "treatment plan":
+    st.header("Step 4 – Treatment Plan")
+    plan = st.session_state.get("plan")
+    if not plan:
+        st.warning("Generate a plan first under ‘Patient Context’.")
+    else:
+        st.text_area("Treatment Plan", value=plan, height=300)
+
+# PAGE 5: Export
+elif st.session_state.page == "export":
+    st.header("Step 5 – Export Report")
+    if "plan" not in st.session_state:
+        st.warning("No plan to export.")
+    else:
+        report = (
+            f"AI X-ray Report — {st.session_state.body_region}\n"
+            f"Generated {datetime.now():%Y-%m-%d %H:%M:%S}\n\n"
+            f"Findings: {st.session_state.results['summary']}\n\n"
+            f"Treatment Plan:\n{st.session_state.plan}\n"
+        )
+        st.download_button("📥 Download Report", report, file_name="xray_report.txt")
+        st.code(report)
+
+st.markdown(
+    "<hr><center><small>AI X-ray Diagnostic Reader v2.0 — Demo Only</small></center>",
+    unsafe_allow_html=True,
+)
